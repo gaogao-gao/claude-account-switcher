@@ -16,22 +16,27 @@ const maxAccounts = 8
 var thresholds = []float64{90, 94, 96, 98}
 
 type tray struct {
-	s          *switcher
-	status     *systray.MenuItem
-	update     *systray.MenuItem
-	accounts   [maxAccounts]*systray.MenuItem
-	auto       *systray.MenuItem
+	s        *switcher
+	status   *systray.MenuItem
+	update   *systray.MenuItem
+	accounts [maxAccounts]*systray.MenuItem
+	third    *systray.MenuItem // the third-party provider; see thirdparty.go
+	add      *systray.MenuItem
+	// Auto-switch is off or on at one threshold: one of these is checked.
+	autoOff    *systray.MenuItem
+	autoAt     []*systray.MenuItem
 	spend      *systray.MenuItem
-	thresholds []*systray.MenuItem
-	add        *systray.MenuItem
-	importNow  *systray.MenuItem
 	autostart  *systray.MenuItem
+	lockSkills *systray.MenuItem
+	syncThird  *systray.MenuItem
+	importNow  *systray.MenuItem
 	lastIcon   string
+	lastTip    string
 	updates    chan struct{}
 }
 
 func (t *tray) onReady() {
-	systray.SetTooltip("Claude Account Switcher")
+	t.setTooltip(tr.Title)
 	t.setIcon(-1, defaultThreshold)
 
 	t.status = systray.AddMenuItem("", "")
@@ -40,19 +45,21 @@ func (t *tray) onReady() {
 	t.update = systray.AddMenuItem("", "Download the new version and restart on it")
 	t.update.Hide()
 	for i := range t.accounts {
-		t.accounts[i] = systray.AddMenuItemCheckbox("", "Switch the Claude app to this account", false)
+		t.accounts[i] = systray.AddMenuItemCheckbox("", tr.SwitchTip, false)
 		t.accounts[i].Hide()
 	}
+	t.third = systray.AddMenuItemCheckbox("", tr.ThirdPartyTip, false)
+	t.third.Hide()
 	systray.AddSeparator()
-	t.auto = systray.AddMenuItemCheckbox("Auto-switch when nearly full", "Switch to the account with the most room left", false)
-	limit := systray.AddMenuItem("Auto-switch at", "")
+	t.add = systray.AddMenuItem(tr.AddAccount, tr.AddAccountTip)
+	auto := systray.AddMenuItem(tr.AutoSwitch, "")
+	t.autoOff = auto.AddSubMenuItemCheckbox(tr.AutoOff, "", false)
 	for _, v := range thresholds {
-		t.thresholds = append(t.thresholds, limit.AddSubMenuItemCheckbox(fmt.Sprintf("%.0f%%", v), "", false))
+		t.autoAt = append(t.autoAt, auto.AddSubMenuItemCheckbox(fmt.Sprintf(tr.AutoAt, v), tr.AutoAtTip, false))
 	}
-	t.spend = systray.AddMenuItemCheckbox("Auto-switch to use up expiring weekly", "Switch to an account whose weekly limit resets within a day with half or more of it unused", false)
-	t.add = systray.AddMenuItem("Add account…", "Restart Claude on its sign-in screen, your current account is kept")
-	t.importNow = systray.AddMenuItem("Import chats from all accounts", "Restart Claude so every chat shows up in this account")
-	systray.AddSeparator()
+	auto.AddSeparator()
+	t.spend = auto.AddSubMenuItemCheckbox(tr.SpendWeekly, tr.SpendWeeklyTip, false)
+	settings := systray.AddMenuItem(tr.Settings, "")
 	// Rewriting an enabled entry keeps its path current and adds the Task
 	// Manager record that entries from before v0.1.2 are missing.
 	if autostartEnabled() {
@@ -60,35 +67,46 @@ func (t *tray) onReady() {
 			log.Printf("refresh start at login: %v", err)
 		}
 	}
-	t.autostart = systray.AddMenuItemCheckbox("Start at login", "", autostartEnabled())
-	folder := systray.AddMenuItem("Open data folder", "")
-	quit := systray.AddMenuItem("Quit", "")
+	t.autostart = settings.AddSubMenuItemCheckbox(tr.StartAtLogin, "", autostartEnabled())
+	t.lockSkills = settings.AddSubMenuItemCheckbox(tr.LockSkills, tr.LockSkillsTip, false)
+	t.syncThird = settings.AddSubMenuItemCheckbox(tr.SyncChats, tr.SyncChatsTip, false)
+	t.importNow = settings.AddSubMenuItem(tr.ImportChats, tr.ImportChatsTip)
+	folder := settings.AddSubMenuItem(tr.OpenFolder, "")
+	systray.AddSeparator()
+	quit := systray.AddMenuItem(tr.Quit, "")
 
 	for i, item := range t.accounts {
 		go func() {
 			for range item.ClickedCh {
 				snap := t.s.snapshot()
-				if i < len(snap.Accounts) && snap.Accounts[i].UUID != snap.Active {
+				switch {
+				case i >= len(snap.Accounts):
+				case snap.Accounts[i].UUID != snap.Active:
 					go t.s.run("Switch", func() error { return t.s.switchTo(snap.Accounts[i].UUID, byHand) })
 				}
 				t.s.onChange()
 			}
 		}()
 	}
-	for i, item := range t.thresholds {
+	for i, item := range t.autoAt {
 		go func() {
 			for range item.ClickedCh {
-				t.s.setThreshold(thresholds[i])
+				t.s.setAutoSwitch(true, thresholds[i])
 			}
 		}()
 	}
 	go func() {
 		for {
 			select {
-			case <-t.auto.ClickedCh:
-				t.s.setAuto(!t.auto.Checked())
+			case <-t.autoOff.ClickedCh:
+				t.s.setAutoSwitch(false, 0)
 			case <-t.spend.ClickedCh:
 				t.s.setSpendWeekly(!t.spend.Checked())
+			case <-t.third.ClickedCh:
+				if !t.s.snapshot().ThirdParty {
+					go t.s.run("Switch to third-party", t.s.switchToThirdParty)
+				}
+				t.s.onChange()
 			case <-t.add.ClickedCh:
 				go t.s.run("Add account", t.s.addAccount)
 			case <-t.importNow.ClickedCh:
@@ -98,6 +116,10 @@ func (t *tray) onReady() {
 					t.s.setStatus("Start at login: " + err.Error())
 				}
 				setChecked(t.autostart, autostartEnabled())
+			case <-t.lockSkills.ClickedCh:
+				go t.s.setLockSkills(!t.lockSkills.Checked())
+			case <-t.syncThird.ClickedCh:
+				t.s.setSyncThirdParty(!t.syncThird.Checked())
 			case <-t.update.ClickedCh:
 				if v := t.s.snapshot().Update; v != "" {
 					go t.s.installUpdate(context.Background(), v)
@@ -105,7 +127,16 @@ func (t *tray) onReady() {
 			case <-folder.ClickedCh:
 				shellOpen(t.s.dir)
 			case <-quit.ClickedCh:
-				systray.Quit()
+				// Quitting in the middle of a switch would leave Claude closed.
+				go func() {
+					if t.s.busy.Load() {
+						t.s.setStatus(tr.QuittingAfter)
+					}
+					for !t.s.busy.CompareAndSwap(false, true) {
+						time.Sleep(200 * time.Millisecond)
+					}
+					systray.Quit()
+				}()
 			}
 		}
 	}()
@@ -119,7 +150,10 @@ func (t *tray) onReady() {
 	}
 	go func() {
 		for range t.updates {
-			t.render()
+			func() {
+				defer logPanic("render")
+				t.render()
+			}()
 		}
 	}()
 	t.s.onChange()
@@ -136,9 +170,12 @@ func (t *tray) loop() {
 			continue
 		}
 		last = time.Now()
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-		t.s.refresh(ctx)
-		cancel()
+		func() {
+			defer logPanic("refresh")
+			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+			defer cancel()
+			t.s.refresh(ctx)
+		}()
 	}
 }
 
@@ -172,13 +209,16 @@ func (t *tray) render() {
 	} else {
 		t.update.Hide()
 	}
-	if len(snap.Accounts) == 0 && snap.Status == "" {
-		t.status.SetTitle("Open Claude and sign in")
+	if len(snap.Accounts) == 0 && snap.Status == "" && !snap.ThirdParty {
+		t.status.SetTitle(tr.SignIn)
 		t.status.Show()
 	}
+	// Switching, adding and importing all restart Claude: not while a
+	// restart runs.
+	canRestart := !snap.Busy
 
 	activePct := -1.0
-	tip := "Claude Account Switcher"
+	tip := tr.Title
 	for i, item := range t.accounts {
 		if i >= len(snap.Accounts) {
 			item.Hide()
@@ -188,11 +228,7 @@ func (t *tray) render() {
 		detail := usageText(a, snap.Threshold, now)
 		item.SetTitle(a.label() + menuTab + detail)
 		setChecked(item, a.UUID == snap.Active)
-		if snap.Busy {
-			item.Disable()
-		} else {
-			item.Enable()
-		}
+		setEnabled(item, canRestart)
 		item.Show()
 		if a.UUID == snap.Active {
 			tip = a.label() + "\n" + detail
@@ -201,21 +237,30 @@ func (t *tray) render() {
 			}
 		}
 	}
-	systray.SetTooltip(tip)
+	if label := snap.ThirdPartyItem; label != "" {
+		t.third.SetTitle(label)
+		setChecked(t.third, snap.ThirdParty)
+		setEnabled(t.third, canRestart)
+		t.third.Show()
+		if snap.ThirdParty {
+			tip = tr.Title + "\n" + label
+		}
+	} else {
+		t.third.Hide()
+	}
+	t.setTooltip(tip)
 	t.setIcon(activePct, snap.Threshold)
 
-	setChecked(t.auto, snap.AutoSwitch)
+	setChecked(t.autoOff, !snap.AutoSwitch)
+	for i, item := range t.autoAt {
+		setChecked(item, snap.AutoSwitch && thresholds[i] == snap.Threshold)
+	}
 	setChecked(t.spend, snap.SpendWeekly)
-	for i, item := range t.thresholds {
-		setChecked(item, thresholds[i] == snap.Threshold)
-	}
-	for _, item := range []*systray.MenuItem{t.add, t.importNow} {
-		if snap.Busy {
-			item.Disable()
-		} else {
-			item.Enable()
-		}
-	}
+	setChecked(t.lockSkills, snap.LockSkills)
+	setChecked(t.syncThird, snap.SyncChats)
+	setEnabled(t.add, canRestart)
+	// Importing goes into the signed-in account.
+	setEnabled(t.importNow, canRestart && !snap.ThirdParty)
 }
 
 // menuTab right-aligns the usage on Windows, where a tab in a menu title
@@ -223,24 +268,28 @@ func (t *tray) render() {
 var menuTab = map[bool]string{true: "\t", false: "    "}[runtime.GOOS == "windows"]
 
 func usageText(a Account, threshold float64, now time.Time) string {
-	if a.Problem != "" {
+	switch a.Problem {
+	case "":
+	case problemSignedOut, "signed out, add it again": // the latter from before 0.3.6-ext.1
+		return tr.SignedOut
+	default:
 		return a.Problem
 	}
 	if a.Usage == nil {
-		return "usage unknown"
+		return tr.UsageUnknown
 	}
 	u := a.Usage.current(now)
-	parts := []string{fmt.Sprintf("5h %.0f%%", u.Session), fmt.Sprintf("week %.0f%%", u.Weekly)}
+	parts := []string{fmt.Sprintf("5h %.0f%%", u.Session), fmt.Sprintf("%s %.0f%%", tr.Week, u.Weekly)}
 	if u.Session >= threshold && !u.SessionReset.IsZero() {
-		parts[0] += " until " + resetText(u.SessionReset, now)
+		parts[0] += tr.Until + resetText(u.SessionReset, now)
 	}
 	// The weekly reset is always shown: it decides how much of the week is left to use.
 	switch {
 	case u.WeeklyReset.IsZero() || !u.WeeklyReset.After(now):
 	case u.Weekly >= threshold:
-		parts[1] += " until " + resetText(u.WeeklyReset, now)
+		parts[1] += tr.Until + resetText(u.WeeklyReset, now)
 	default:
-		parts[1] += ", resets " + resetText(u.WeeklyReset, now)
+		parts[1] += tr.Resets + resetText(u.WeeklyReset, now)
 	}
 	return strings.Join(parts, " · ")
 }
@@ -255,6 +304,16 @@ func resetText(at, now time.Time) string {
 	}
 	// A weekday alone would read as today for a reset a week out.
 	return at.Format("Mon 2 Jan 15:04")
+}
+
+// setTooltip only passes a new text on: on Windows each call can wait on the
+// shell, and its timeouts filled the log.
+func (t *tray) setTooltip(tip string) {
+	if tip == t.lastTip {
+		return
+	}
+	t.lastTip = tip
+	systray.SetTooltip(tip)
 }
 
 func (t *tray) setIcon(pct, threshold float64) {
@@ -272,6 +331,16 @@ func setChecked(item *systray.MenuItem, on bool) {
 			item.Check()
 		} else {
 			item.Uncheck()
+		}
+	}
+}
+
+func setEnabled(item *systray.MenuItem, on bool) {
+	if on == item.Disabled() {
+		if on {
+			item.Enable()
+		} else {
+			item.Disable()
 		}
 	}
 }

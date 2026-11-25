@@ -45,6 +45,13 @@ func TestCheckUpdate(t *testing.T) {
 	latestAPI = srv.URL
 
 	s := &switcher{dir: t.TempDir(), onChange: func() {}}
+	if !updatesEnabled {
+		s.checkUpdate(context.Background())
+		if got := s.snapshot().Update; calls != 0 || got != "" {
+			t.Fatalf("updates are off, yet %d checks and update %q", calls, got)
+		}
+		return
+	}
 	s.checkUpdate(context.Background())
 	if got := s.snapshot().Update; got != "99.0.0" {
 		t.Fatalf("update = %q, want 99.0.0", got)

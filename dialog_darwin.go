@@ -41,8 +41,8 @@ func nativeResume(titles []string, wait time.Duration) []bool {
 	switch {
 	case ctx.Err() != nil:
 		return keep
-	case errors.As(err, &exit):
-		// Don't continue makes osascript fail with "User canceled".
+	case errors.As(err, &exit) && strings.Contains(string(exit.Stderr), "-128"):
+		// Don't continue makes osascript fail with "User canceled. (-128)".
 		return make([]bool, len(titles))
 	case err != nil:
 		return keep

@@ -18,7 +18,7 @@ jobs:
             out: claude-account-switcher-windows-amd64.exe
             flags: -H=windowsgui -s -w
           - os: macos-latest
-            out: claude-account-switcher-macos
+            out: claude-account-switcher-macos.zip
             flags: -s -w
     runs-on: ${{ matrix.os }}
     steps:
@@ -35,6 +35,7 @@ jobs:
         shell: bash
         run: |
           v=$(sed -n 's/^const version = "\(.*\)"/\1/p' main.go)
+          v=${v%%-*} # numbers only: 0.3.6-ext.1 is 0.3.6
           go run github.com/tc-hib/go-winres@v0.3.3 make --arch amd64 --product-version "$v.0" --file-version "$v.0"
       - name: Build
         shell: bash
@@ -43,8 +44,19 @@ jobs:
           if [ "$RUNNER_OS" = macOS ]; then
             CGO_ENABLED=1 GOARCH=arm64 go build -ldflags "${{ matrix.flags }}" -o dist/arm64 .
             CGO_ENABLED=1 GOARCH=amd64 go build -ldflags "${{ matrix.flags }}" -o dist/amd64 .
-            lipo -create -output "dist/${{ matrix.out }}" dist/arm64 dist/amd64
+            # A menu bar app bundle around the universal binary, signed ad hoc
+            # so Gatekeeper sees one consistent signature.
+            app="dist/Claude Account Switcher.app"
+            mkdir -p "$app/Contents/MacOS"
+            lipo -create -output "$app/Contents/MacOS/claude-account-switcher" dist/arm64 dist/amd64
             rm dist/arm64 dist/amd64
+            cp packaging/macos/Info.plist "$app/Contents/Info.plist"
+            v=$(sed -n 's/^const version = "\(.*\)"/\1/p' main.go)
+            v=${v%%-*}
+            plutil -replace CFBundleShortVersionString -string "$v" "$app/Contents/Info.plist"
+            plutil -replace CFBundleVersion -string "$v" "$app/Contents/Info.plist"
+            codesign --force --deep -s - "$app"
+            (cd dist && ditto -c -k --keepParent "Claude Account Switcher.app" "${{ matrix.out }}" && rm -rf "Claude Account Switcher.app")
           else
             go build -ldflags "${{ matrix.flags }}" -o "dist/${{ matrix.out }}" .
           fi

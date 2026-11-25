@@ -11,12 +11,13 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"time"
 
 	"fyne.io/systray"
 )
 
-const version = "0.3.6"
+const version = "0.3.6-ext.1"
 
 func main() {
 	// The dialog process started by askInDialogProcess.
@@ -46,6 +47,7 @@ func main() {
 	if relaunchOutsideDesktop(dir) {
 		return
 	}
+	setLanguage()
 
 	lock, ok := lockInstance(instancePort)
 	if !ok {
@@ -56,6 +58,8 @@ func main() {
 
 	log.Printf("claude-account-switcher %s, app data in %s", version, claudeDesktop().dir)
 	t := &tray{s: newSwitcher(dir), updates: make(chan struct{}, 1)}
+	t.s.recoverSwitch()
+	go t.s.lockSkills()
 	// When a newer version starts, a running switch finishes first and no new
 	// one begins before this one quits.
 	go serveInstance(lock, func() {
@@ -63,6 +67,8 @@ func main() {
 			time.Sleep(200 * time.Millisecond)
 		}
 		systray.Quit()
+	}, func(v string) {
+		t.s.setStatus(fmt.Sprintf(tr.OtherCopy, v))
 	})
 	systray.Run(t.onReady, func() {})
 }
@@ -83,6 +89,16 @@ func setupLog(path string, console bool) {
 	} else {
 		log.SetOutput(f)
 	}
+	// A crash in a tray app leaves no trace otherwise.
+	_ = debug.SetCrashOutput(f, debug.CrashOptions{})
+}
+
+// logPanic records a panic in the goroutine it is deferred in, with its stack,
+// and lets the tray keep running.
+func logPanic(where string) {
+	if r := recover(); r != nil {
+		log.Printf("panic in %s: %v\n%s", where, r, debug.Stack())
+	}
 }
 
 // printStatus checks once and prints what the menu would show. It only reports:
@@ -101,5 +117,12 @@ func printStatus(s *switcher) {
 			mark = "*"
 		}
 		fmt.Printf("%s %s  %s\n", mark, a.label(), usageText(a, snap.Threshold, time.Now()))
+	}
+	if snap.ThirdPartyItem != "" {
+		mark := " "
+		if snap.ThirdParty {
+			mark = "*"
+		}
+		fmt.Printf("%s %s\n", mark, snap.ThirdPartyItem)
 	}
 }

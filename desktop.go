@@ -16,7 +16,12 @@ type desktop struct{ dir string }
 func (d desktop) configPath() string     { return filepath.Join(d.dir, "config.json") }
 func (d desktop) localStatePath() string { return filepath.Join(d.dir, "Local State") }
 func (d desktop) sessionsDir() string    { return filepath.Join(d.dir, "claude-code-sessions") }
+func (d desktop) appConfigPath() string  { return filepath.Join(d.dir, "claude_desktop_config.json") }
 func (d desktop) spacesDir() string      { return filepath.Join(d.dir, "local-agent-mode-sessions") }
+func (d desktop) skillsDir() string      { return filepath.Join(d.spacesDir(), "skills-plugin") }
+func (d desktop) localStorageDir() string {
+	return filepath.Join(d.dir, "Local Storage", "leveldb")
+}
 
 // cookieFiles hold the claude.ai web session. They are locked while the app runs.
 // Newer Chromium builds keep them in Network/, the macOS app keeps them in the
@@ -77,13 +82,18 @@ type object struct {
 }
 
 func readObject(path string) (*object, error) {
-	data, err := os.ReadFile(path)
+	data, err := readJSONFile(path)
 	if err != nil {
 		return nil, err
 	}
+	return parseObject(data, path)
+}
+
+// parseObject reads the JSON object in data; name says where it is from.
+func parseObject(data []byte, name string) (*object, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
-		return nil, fmt.Errorf("%s: not a JSON object", path)
+		return nil, fmt.Errorf("%s: not a JSON object", name)
 	}
 	o := &object{vals: map[string]json.RawMessage{}}
 	for dec.More() {
@@ -98,6 +108,13 @@ func readObject(path string) (*object, error) {
 		o.set(tok.(string), v)
 	}
 	return o, nil
+}
+
+// readJSONFile reads a JSON file, dropping a UTF-8 byte order mark that
+// Windows tools such as PowerShell put in front.
+func readJSONFile(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	return bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf}), err
 }
 
 func (o *object) get(k string) (json.RawMessage, bool) {
@@ -125,8 +142,8 @@ func (o *object) del(k string) {
 	}
 }
 
-// write saves the object the way the app does: tab indented, no trailing newline.
-func (o *object) write(path string) error {
+// raw is the object as compact JSON.
+func (o *object) raw() json.RawMessage {
 	var buf bytes.Buffer
 	buf.WriteByte('{')
 	for i, k := range o.keys {
@@ -139,8 +156,13 @@ func (o *object) write(path string) error {
 		buf.Write(o.vals[k])
 	}
 	buf.WriteByte('}')
+	return buf.Bytes()
+}
+
+// write saves the object the way the app does: tab indented, no trailing newline.
+func (o *object) write(path string) error {
 	var out bytes.Buffer
-	if err := json.Indent(&out, buf.Bytes(), "", "\t"); err != nil {
+	if err := json.Indent(&out, o.raw(), "", "\t"); err != nil {
 		return err
 	}
 	return writeFileAtomic(path, out.Bytes())

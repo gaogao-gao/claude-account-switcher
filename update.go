@@ -20,12 +20,16 @@ import (
 )
 
 const (
-	repoURL = "https://github.com/SnlperStripes/claude-account-switcher"
+	// updatesEnabled is off in this fork: upstream's releases would
+	// replace it. Nothing is checked and no update is offered.
+	updatesEnabled = false
+
+	repoURL = "https://github.com/gaogao-gao/claude-account-switcher"
 	// GitHub is asked for the latest release at most this often.
 	updateEvery = 24 * time.Hour
 )
 
-var latestAPI = "https://api.github.com/repos/SnlperStripes/claude-account-switcher/releases/latest"
+var latestAPI = "https://api.github.com/repos/gaogao-gao/claude-account-switcher/releases/latest"
 
 // latestRelease asks GitHub for the version of the latest release, like "0.3.0".
 // Nothing about the user or their accounts goes along.
@@ -92,7 +96,7 @@ func newerVersion(a, b string) bool {
 // the last answer is a day old. A failed check is tried again next time.
 func (s *switcher) checkUpdate(ctx context.Context) {
 	s.mu.Lock()
-	due := !s.st.NoUpdateCheck && time.Since(s.st.UpdateChecked) >= updateEvery
+	due := updatesEnabled && !s.st.NoUpdateCheck && time.Since(s.st.UpdateChecked) >= updateEvery
 	s.mu.Unlock()
 	if !due {
 		return

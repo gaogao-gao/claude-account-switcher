@@ -2,3 +2,7 @@
 /claude-account-switcher
 /dist/
 *.syso
+*.log
+.DS_Store
+.vscode/
+.idea/

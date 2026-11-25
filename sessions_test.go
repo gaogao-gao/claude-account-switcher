@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -15,7 +16,7 @@ func TestSyncSessionsKeepsAccountLocalIdentity(t *testing.T) {
 	want := `{"sessionId":"local_target","cliSessionId":"shared","lastActivityAt":100,"isStarred":true,"isArchived":true,"spaceId":"own-project","futureSetting":42}`
 	write(t, target, want)
 	for range 2 {
-		n, err := syncSessions(root, "b", "ob")
+		n, err := syncSessions(root, "b", "ob", "")
 		if err != nil || n != 0 {
 			t.Fatalf("sync = %d, %v; want no imported aliases", n, err)
 		}
@@ -34,7 +35,7 @@ func TestSyncSessionsNewAccountGetsOneEntryPerConversation(t *testing.T) {
 	write(t, filepath.Join(root, "b", "ob", "local_new.json"), `{"sessionId":"local_new","cliSessionId":"shared","title":"Same title","lastActivityAt":300,"future":true}`)
 	write(t, filepath.Join(root, "a", "oa", "local_other.json"), `{"sessionId":"local_other","cliSessionId":"different","title":"Same title","lastActivityAt":200}`)
 	for i := range 2 {
-		n, err := syncSessions(root, "c", "oc")
+		n, err := syncSessions(root, "c", "oc", "")
 		if err != nil || (i == 0 && n != 2) || (i == 1 && n != 0) {
 			t.Fatalf("sync %d = %d, %v", i, n, err)
 		}
@@ -53,7 +54,7 @@ func TestSyncSessionsDoesNotRestoreDeletedAlias(t *testing.T) {
 	write(t, filepath.Join(root, "a", "oa", "local_first.json"), `{"cliSessionId":"shared","lastActivityAt":100}`)
 	write(t, filepath.Join(root, "b", "ob", "local_alias.json"), `{"cliSessionId":"shared","lastActivityAt":200}`)
 	write(t, filepath.Join(root, "a", "oa", "deleted_first"), "1")
-	if n, err := syncSessions(root, "c", "oc"); err != nil || n != 0 {
+	if n, err := syncSessions(root, "c", "oc", ""); err != nil || n != 0 {
 		t.Fatalf("deleted conversation restored through its alias: %d, %v", n, err)
 	}
 }
@@ -64,7 +65,7 @@ func TestSyncSessionsSkipsStrayFile(t *testing.T) {
 	source := filepath.Join(root, "a", "oa", "local_valid.json")
 	write(t, source, `{"cliSessionId":"valid","lastActivityAt":100}`)
 	for i := range 2 {
-		n, err := syncSessions(root, "b", "ob")
+		n, err := syncSessions(root, "b", "ob", "")
 		if err != nil || (i == 0 && n != 1) || (i == 1 && n != 0) {
 			t.Fatalf("sync %d with a stray file = %d, %v", i, n, err)
 		}
@@ -82,7 +83,7 @@ func TestSyncSessionsSkipsMalformedSourceIndex(t *testing.T) {
 			write(t, path, data)
 			write(t, filepath.Join(root, "a", "oa", "local_valid.json"), `{"cliSessionId":"valid","lastActivityAt":100}`)
 			for i := range 2 {
-				n, err := syncSessions(root, "b", "ob")
+				n, err := syncSessions(root, "b", "ob", "")
 				if err != nil || (i == 0 && n != 1) || (i == 1 && n != 0) {
 					t.Fatalf("sync %d with a malformed source = %d, %v", i, n, err)
 				}
@@ -106,7 +107,7 @@ func TestSyncSessionsPreservesMalformedTargetIndex(t *testing.T) {
 			target := filepath.Join(root, "b", "ob", "local_broken.json")
 			write(t, target, data)
 			for i := range 2 {
-				n, err := syncSessions(root, "b", "ob")
+				n, err := syncSessions(root, "b", "ob", "")
 				if err != nil || (i == 0 && n != 1) || (i == 1 && n != 0) {
 					t.Fatalf("sync %d with a malformed target = %d, %v", i, n, err)
 				}
@@ -118,21 +119,206 @@ func TestSyncSessionsPreservesMalformedTargetIndex(t *testing.T) {
 	}
 }
 
-func TestSyncSessionsSkipsLocalIDCollision(t *testing.T) {
+// useTranscripts points continues at a temporary projects folder.
+func useTranscripts(t *testing.T, files map[string]string) {
+	dir := t.TempDir()
+	for cli, data := range files {
+		write(t, filepath.Join(dir, "proj", cli+".jsonl"), data)
+	}
+	old := transcripts
+	transcripts = func() string { return dir }
+	t.Cleanup(func() { transcripts = old })
+}
+
+func TestSyncSessionsContinuedChatTakesNewest(t *testing.T) {
+	useTranscripts(t, map[string]string{
+		// The prompt left unanswered here was sent again in the other account.
+		"second": `{"type":"user","uuid":"m1"}` + "\n" + `{"type":"assistant","uuid":"m2"}` + "\n" + `{"type":"user","uuid":"typo"}` + "\n",
+		"first":  `{"type":"user","uuid":"m1"}` + "\n" + `{"type":"assistant","uuid":"m2"}` + "\n" + `{"type":"user","uuid":"m3"}` + "\n",
+	})
 	root := t.TempDir()
-	write(t, filepath.Join(root, "a", "oa", "local_same.json"), `{"cliSessionId":"first","lastActivityAt":200}`)
+	newer := `{"cliSessionId":"first","lastActivityAt":200}`
+	write(t, filepath.Join(root, "a", "oa", "local_same.json"), newer)
 	write(t, filepath.Join(root, "a", "oa", "local_other.json"), `{"cliSessionId":"other","lastActivityAt":300}`)
 	target := filepath.Join(root, "b", "ob", "local_same.json")
-	want := `{"cliSessionId":"second","lastActivityAt":100}`
-	write(t, target, want)
+	write(t, target, `{"cliSessionId":"second","lastActivityAt":100}`)
 	for i := range 2 {
-		n, err := syncSessions(root, "b", "ob")
-		if err != nil || (i == 0 && n != 1) || (i == 1 && n != 0) {
-			t.Fatalf("sync %d with a local ID collision = %d, %v", i, n, err)
+		n, err := syncSessions(root, "b", "ob", "")
+		if err != nil || (i == 0 && n != 2) || (i == 1 && n != 0) {
+			t.Fatalf("sync %d with a continued chat = %d, %v", i, n, err)
 		}
 	}
+	if read(t, target) != newer {
+		t.Fatal("continued chat kept the older conversation")
+	}
+	if entries, _ := os.ReadDir(filepath.Join(root, "b", "ob")); len(entries) != 2 {
+		t.Fatalf("target has %d entries, want no branch for a plain continuation", len(entries))
+	}
+}
+
+func TestSyncSessionsForkedChatKeepsBranch(t *testing.T) {
+	useTranscripts(t, map[string]string{
+		"older": `{"type":"user","uuid":"m1"}` + "\n" + `{"type":"assistant","uuid":"only-here"}` + "\n",
+		"newer": `{"type":"user","uuid":"m1"}` + "\n" + `{"type":"assistant","uuid":"m9"}` + "\n",
+	})
+	root := t.TempDir()
+	newer := `{"sessionId":"local_same","cliSessionId":"newer","title":"Plan","lastActivityAt":200}`
+	write(t, filepath.Join(root, "a", "oa", "local_same.json"), newer)
+	target := filepath.Join(root, "b", "ob", "local_same.json")
+	write(t, target, `{"sessionId":"local_same","cliSessionId":"older","title":"Plan","lastActivityAt":100}`)
+	if n, err := syncSessions(root, "b", "ob", ""); err != nil || n != 2 {
+		t.Fatalf("sync with a forked chat = %d, %v; want the branch and the newer entry", n, err)
+	}
+	if read(t, target) != newer {
+		t.Fatal("forked chat did not take the newer conversation")
+	}
+	branches, _ := filepath.Glob(filepath.Join(root, "b", "ob", "local_*.json"))
+	var branch *object
+	for _, p := range branches {
+		if !samePath(p, target) {
+			branch, _ = readObject(p)
+			if id := stringField(branch, "sessionId"); id+".json" != filepath.Base(p) {
+				t.Fatalf("branch sessionId %q does not match its file %s", id, filepath.Base(p))
+			}
+		}
+	}
+	if branch == nil || stringField(branch, "cliSessionId") != "older" || stringField(branch, "title") != "Plan (branch)" {
+		t.Fatalf("older branch not kept: %d entries", len(branches))
+	}
+	// The branch reaches the other account, and both settle.
+	if n, err := syncSessions(root, "a", "oa", ""); err != nil || n != 1 {
+		t.Fatalf("branch import = %d, %v", n, err)
+	}
+	for _, acct := range []string{"a", "b"} {
+		if n, err := syncSessions(root, acct, "o"+acct, ""); err != nil || n != 0 {
+			t.Fatalf("resync %s = %d, %v; want settled", acct, n, err)
+		}
+	}
+}
+
+func TestSyncSessionsForkWithoutTranscriptsKeepsBranch(t *testing.T) {
+	useTranscripts(t, nil)
+	root := t.TempDir()
+	write(t, filepath.Join(root, "a", "oa", "local_same.json"), `{"cliSessionId":"newer","lastActivityAt":200}`)
+	write(t, filepath.Join(root, "b", "ob", "local_same.json"), `{"cliSessionId":"older","lastActivityAt":100}`)
+	if n, err := syncSessions(root, "b", "ob", ""); err != nil || n != 2 {
+		t.Fatalf("sync = %d, %v; want a branch kept when the transcripts are missing", n, err)
+	}
+}
+
+func TestSyncSessionsPriorConversationIsNoFork(t *testing.T) {
+	useTranscripts(t, nil)
+	root := t.TempDir()
+	write(t, filepath.Join(root, "a", "oa", "local_same.json"), `{"cliSessionId":"newer","priorCliSessionIds":["older"],"lastActivityAt":200}`)
+	write(t, filepath.Join(root, "b", "ob", "local_same.json"), `{"cliSessionId":"older","lastActivityAt":100}`)
+	if n, err := syncSessions(root, "b", "ob", ""); err != nil || n != 1 {
+		t.Fatalf("sync = %d, %v; want the newer entry only, no branch", n, err)
+	}
+}
+
+func TestSyncSessionsDivergedChatKeepsNewerTarget(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "a", "oa", "local_same.json"), `{"cliSessionId":"first","lastActivityAt":100}`)
+	target := filepath.Join(root, "b", "ob", "local_same.json")
+	want := `{"cliSessionId":"second","lastActivityAt":200}`
+	write(t, target, want)
+	if n, err := syncSessions(root, "b", "ob", ""); err != nil || n != 0 {
+		t.Fatalf("sync = %d, %v; want nothing written", n, err)
+	}
 	if read(t, target) != want {
-		t.Fatal("local ID collision overwrote another conversation")
+		t.Fatal("an older conversation replaced the target's newer one")
+	}
+}
+
+func TestSyncSessionsPropagatesDeletion(t *testing.T) {
+	root := t.TempDir()
+	trash := t.TempDir()
+	write(t, filepath.Join(root, "a", "oa", "deleted_gone"), "500")
+	target := filepath.Join(root, "b", "ob", "local_gone.json")
+	write(t, target, `{"cliSessionId":"gone","lastActivityAt":400}`)
+	alias := filepath.Join(root, "b", "ob", "local_alias.json")
+	write(t, alias, `{"cliSessionId":"gone","lastActivityAt":450}`)
+	kept := filepath.Join(root, "b", "ob", "local_kept.json")
+	write(t, kept, `{"cliSessionId":"kept","lastActivityAt":100}`)
+	for i := range 2 {
+		n, err := syncSessions(root, "b", "ob", trash)
+		if err != nil || (i == 0 && n != 2) || (i == 1 && n != 0) {
+			t.Fatalf("sync %d with a deletion = %d, %v", i, n, err)
+		}
+	}
+	for _, p := range []string{target, alias} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("%s survived its deletion in another account", filepath.Base(p))
+		}
+	}
+	if _, err := os.Stat(kept); err != nil {
+		t.Fatal("an unrelated chat was removed")
+	}
+	if got := read(t, filepath.Join(root, "b", "ob", "deleted_gone")); got != "500" {
+		t.Fatalf("target marker = %q, want the deletion time", got)
+	}
+	backups, _ := filepath.Glob(filepath.Join(trash, "*", "b_local_*.json"))
+	if len(backups) != 2 {
+		t.Fatalf("trash holds %d entries, want both removed ones", len(backups))
+	}
+}
+
+func TestKeepBranchTitleFollowsLanguage(t *testing.T) {
+	defer func(old *texts) { tr = old }(tr)
+	path := filepath.Join(t.TempDir(), "local_x.json")
+	write(t, path, `{"sessionId":"local_x","cliSessionId":"c","title":"Plan"}`)
+	for _, c := range []struct {
+		lang *texts
+		want string
+	}{{&english, "Plan (branch)"}, {&chinese, "Plan (分支)"}} {
+		tr = c.lang
+		name, err := keepBranch(sessionIndex{path: path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		o, err := readObject(filepath.Join(filepath.Dir(path), name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := stringField(o, "title"); got != c.want {
+			t.Errorf("branch title = %q, want %q", got, c.want)
+		}
+	}
+}
+
+func TestRemoveSessionKeepsSameNameInTrash(t *testing.T) {
+	root, trash := t.TempDir(), t.TempDir()
+	path := filepath.Join(root, "b", "ob", "local_x.json")
+	for _, body := range []string{`{"n":1}`, `{"n":2}`, `{"n":3}`} {
+		write(t, path, body)
+		if err := removeSession(path, trash); err != nil {
+			t.Fatal(err)
+		}
+	}
+	moved, _ := filepath.Glob(filepath.Join(trash, "*", "b_local_x*.json"))
+	if len(moved) != 3 {
+		t.Fatalf("trash holds %d copies, want all three", len(moved))
+	}
+	seen := map[string]bool{}
+	for _, p := range moved {
+		seen[read(t, p)] = true
+	}
+	if len(seen) != 3 {
+		t.Fatalf("a removed entry overwrote another in the trash: %v", seen)
+	}
+}
+
+func TestSyncSessionsKeepsChatUsedAfterDeletion(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "a", "oa", "deleted_busy"), "500")
+	target := filepath.Join(root, "b", "ob", "local_busy.json")
+	want := `{"cliSessionId":"busy","lastActivityAt":900}`
+	write(t, target, want)
+	if n, err := syncSessions(root, "b", "ob", ""); err != nil || n != 0 {
+		t.Fatalf("sync = %d, %v; want nothing removed", n, err)
+	}
+	if read(t, target) != want {
+		t.Fatal("a chat used after the deletion was removed")
 	}
 }
 
@@ -142,7 +328,7 @@ func TestSyncSessionsReportsWriteFailure(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "b", "ob", "local_valid.json.switcher-tmp"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := syncSessions(root, "b", "ob"); err == nil || n != 0 {
+	if n, err := syncSessions(root, "b", "ob", ""); err == nil || n != 0 {
 		t.Fatalf("sync with a blocked destination = %d, %v; want a write error", n, err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "b", "ob", "local_valid.json")); !os.IsNotExist(err) {
@@ -157,7 +343,7 @@ func TestSessionIdentityWithoutCLI(t *testing.T) {
 		data, _ := json.Marshal(map[string]any{"sessionId": "local_" + id, "title": "Same title", "lastActivityAt": 1})
 		write(t, filepath.Join(root, "a", "oa", "local_"+id+".json"), string(data))
 	}
-	if n, err := syncSessions(root, "b", "ob"); err != nil || n != 2 {
+	if n, err := syncSessions(root, "b", "ob", ""); err != nil || n != 2 {
 		t.Fatalf("legacy entries without CLI IDs were merged: %d, %v", n, err)
 	}
 }
@@ -193,7 +379,7 @@ func TestSyncSessionsRealSample(t *testing.T) {
 	}
 	for round := range 2 {
 		for _, dir := range dirs {
-			n, err := syncSessions(root, filepath.Base(filepath.Dir(dir)), filepath.Base(dir))
+			n, err := syncSessions(root, filepath.Base(filepath.Dir(dir)), filepath.Base(dir), "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -277,5 +463,59 @@ func TestTakeCutChatsSameAccount(t *testing.T) {
 		if _, ok := o.get("interruptedByQuitAt"); !ok {
 			t.Fatal("restart in the same account removed the mark")
 		}
+	}
+}
+
+func TestSyncSessionsDropsQuitMarkOnCopy(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "a", "oa", "local_cut.json"), `{"cliSessionId":"cut","lastActivityAt":200,"interruptedByQuitAt":150,"interruptedAwaitingPerson":false,"title":"T"}`)
+	if n, err := syncSessions(root, "b", "ob", ""); err != nil || n != 1 {
+		t.Fatalf("sync = %d, %v", n, err)
+	}
+	o, err := readObject(filepath.Join(root, "b", "ob", "local_cut.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range cutMarkKeys {
+		if _, ok := o.get(k); ok {
+			t.Fatalf("copy kept %s, the chat would be continued again in the other account", k)
+		}
+	}
+	if stringField(o, "title") != "T" {
+		t.Fatal("copy lost its other fields")
+	}
+}
+
+func TestSyncSessionsForkKeepsOneBranch(t *testing.T) {
+	useTranscripts(t, nil)
+	root := t.TempDir()
+	write(t, filepath.Join(root, "a", "oa", "local_same.json"), `{"cliSessionId":"newer","lastActivityAt":200}`)
+	write(t, filepath.Join(root, "b", "ob", "local_same.json"), `{"cliSessionId":"older","lastActivityAt":100}`)
+	write(t, filepath.Join(root, "b", "ob", "local_kept.json"), `{"cliSessionId":"older","lastActivityAt":100}`)
+	if n, err := syncSessions(root, "b", "ob", ""); err != nil || n != 1 {
+		t.Fatalf("sync = %d, %v; want no second branch of a conversation already shown", n, err)
+	}
+}
+
+func TestTurnOpenIgnoresLocalCommands(t *testing.T) {
+	tail := []byte(`{"type":"assistant","message":{"stop_reason":"end_turn","content":[]}}` + "\n" +
+		`{"type":"user","message":{"content":"<command-name>/model</command-name>"}}` + "\n" +
+		`{"type":"user","message":{"content":"<local-command-stdout>Set model</local-command-stdout>"}}` + "\n" +
+		`{"type":"user","isMeta":true,"message":{"content":"caveat"}}` + "\n")
+	if turnOpen(tail) {
+		t.Fatal("a finished chat followed by a local command counts as running")
+	}
+}
+
+func TestFileContainsAcrossReads(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "big.jsonl")
+	data := bytes.Repeat([]byte("x"), 1<<20-5)
+	data = append(data, []byte(`"uuid":"needle"`)...)
+	write(t, p, string(data))
+	if !fileContains(p, []byte(`"uuid":"needle"`)) {
+		t.Fatal("needle spanning two reads not found")
+	}
+	if fileContains(p, []byte(`"uuid":"other"`)) {
+		t.Fatal("found a needle that is not there")
 	}
 }

@@ -44,14 +44,17 @@ func TestSyncSpaces(t *testing.T) {
 	}
 
 	// A project deleted in b stays deleted.
-	write(t, filepath.Join(root, "b", "ob", "spaces.json"), `{"spaces":[]}`)
+	write(t, filepath.Join(root, "b", "ob", "spaces.json"), `{"spaces":[{"id":"web","name":"Web v2","updatedAt":300}]}`)
 	if n, _ := syncSpaces(root, "b", "ob", seen); n != 0 {
-		t.Fatalf("deleted projects came back, wrote %d", n)
+		t.Fatalf("deleted project came back, wrote %d", n)
 	}
 
-	// A brand new account gets the file.
-	if n, _ := syncSpaces(root, "c", "oc", seen); n != 2 {
-		t.Fatalf("new account got %d, want 2", n)
+	// The deletion in b reaches the other accounts, a new one included.
+	if n, _ := syncSpaces(root, "c", "oc", seen); n != 1 {
+		t.Fatalf("new account got %d projects, want web only", n)
+	}
+	if n, _ := syncSpaces(root, "a", "oa", seen); n != 1 {
+		t.Fatalf("a removed %d, want the project deleted in b", n)
 	}
 
 	// An unreadable file is left alone.
@@ -80,4 +83,45 @@ func spacesByID(t *testing.T, path string) (map[string]json.RawMessage, map[stri
 		out[sp["id"].(string)] = sp
 	}
 	return file, out
+}
+
+func TestSyncSpacesIgnoresWipedAccount(t *testing.T) {
+	root, seen := t.TempDir(), filepath.Join(t.TempDir(), "seen.json")
+	path := func(acct string) string { return filepath.Join(root, acct, "o"+acct, "spaces.json") }
+	all := `{"spaces":[{"id":"p1","updatedAt":1},{"id":"p2","updatedAt":1},{"id":"p3","updatedAt":1}]}`
+	write(t, path("a"), all)
+	write(t, path("b"), all)
+	for _, acct := range []string{"a", "b"} {
+		if _, err := syncSpaces(root, acct, "o"+acct, seen); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, wipe := range []string{`{"spaces":[]}`, `{}`} {
+		write(t, path("b"), wipe)
+		if n, err := syncSpaces(root, "a", "oa", seen); err != nil || n != 0 {
+			t.Fatalf("a after b was wiped to %s: wrote %d, %v", wipe, n, err)
+		}
+		if n, err := syncSpaces(root, "b", "ob", seen); err != nil || n != 2 && n != 3 {
+			t.Fatalf("b wiped to %s got %d projects back, %v", wipe, n, err)
+		}
+		_, got := spacesByID(t, path("b"))
+		if len(got) != 3 {
+			t.Fatalf("b holds %d projects after %s, want 3", len(got), wipe)
+		}
+	}
+	backups, _ := filepath.Glob(filepath.Join(filepath.Dir(seen), "spaces-backups", "b", "*", "spaces.json"))
+	if len(backups) == 0 {
+		t.Fatal("b's spaces.json was rewritten without a backup")
+	}
+
+	// Deleting most but not all projects is the user's doing and spreads.
+	write(t, path("b"), `{"spaces":[{"id":"p1","updatedAt":1}]}`)
+	for _, acct := range []string{"a", "b"} {
+		if _, err := syncSpaces(root, acct, "o"+acct, seen); err != nil {
+			t.Fatal(err)
+		}
+		if _, got := spacesByID(t, path(acct)); len(got) != 1 || got["p1"] == nil {
+			t.Fatalf("%s holds %v after b deleted p2 and p3", acct, got)
+		}
+	}
 }

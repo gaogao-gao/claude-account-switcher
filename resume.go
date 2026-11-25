@@ -50,9 +50,20 @@ func chooseResume(account string, chats []cutChat, wait time.Duration) []bool {
 	if err == nil {
 		return keep
 	}
+	if errors.Is(err, errNoAnswer) {
+		// The dialog hung; a second one would keep Claude closed even longer.
+		log.Printf("resume dialog: %v, all chats go on", err)
+		keep = make([]bool, len(chats))
+		for i := range keep {
+			keep[i] = true
+		}
+		return keep
+	}
 	log.Printf("resume dialog: %v, using the plain one", err)
 	return nativeResume(titles, wait)
 }
+
+var errNoAnswer = errors.New("no answer")
 
 func askInDialogProcess(req resumeRequest, wait time.Duration) ([]bool, error) {
 	exe, err := os.Executable()
@@ -60,8 +71,9 @@ func askInDialogProcess(req resumeRequest, wait time.Duration) ([]bool, error) {
 		return nil, err
 	}
 	in, _ := json.Marshal(req)
-	// The page counts down by itself; this only catches a dialog that hangs.
-	ctx, cancel := context.WithTimeout(context.Background(), wait+time.Minute)
+	// The page counts down by itself, and gives a paused choice four minutes;
+	// this only catches a dialog that hangs.
+	ctx, cancel := context.WithTimeout(context.Background(), wait+5*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, exe, resumeFlag)
 	cmd.Stdin = bytes.NewReader(in)
@@ -69,7 +81,7 @@ func askInDialogProcess(req resumeRequest, wait time.Duration) ([]bool, error) {
 	cmd.Stdout, cmd.Stderr = &out, &stderr
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
-			return nil, errors.New("no answer")
+			return nil, errNoAnswer
 		}
 		return nil, fmt.Errorf("%v %s", err, strings.TrimSpace(stderr.String()))
 	}

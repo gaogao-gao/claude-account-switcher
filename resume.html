@@ -235,12 +235,14 @@ const tick = setInterval(() => {
 }, 100);
 $("left").textContent = `Continuing in ${data.wait} s`;
 
-// Someone choosing gets all the time they need.
+// Someone choosing gets plenty of time, but Claude stays closed meanwhile:
+// after a few minutes their choice so far goes through.
 function pause() {
   if ($("timer").classList.contains("paused")) return;
   clearInterval(tick);
   $("timer").classList.add("paused");
   $("left").textContent = "Waiting for you";
+  setTimeout(() => finish(boxes.map(b => b.checked)), 4 * 60 * 1000);
 }
 
 update();

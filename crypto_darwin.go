@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/pbkdf2"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 )
 
 // On macOS the app encrypts with Chromium's scheme: a password in the login
@@ -18,18 +20,62 @@ import (
 // read that keychain item.
 
 var (
-	keyOnce sync.Once
-	keyVal  []byte
-	keyErr  error
+	keyMu     sync.Mutex
+	keyVal    []byte
+	keyErr    error
+	keyFailed time.Time
+	// keyLoading is closed when the keychain read in flight ends.
+	keyLoading chan struct{}
 )
 
+const (
+	// macOS waits for the user to answer its prompt; one left open must not
+	// hold the switcher up for good.
+	keyWait = time.Minute
+	// After a denied or failed read the keychain is asked again this much
+	// later, not on every check.
+	keyRetry = 5 * time.Minute
+	// A caller waits this long for a read in flight, then goes on without.
+	keyCallerWait = 10 * time.Second
+)
+
+// appKey returns the app's key. The keychain is read in the background, one
+// read at a time, so a prompt nobody answers holds up no caller for long.
 func appKey() ([]byte, error) {
-	keyOnce.Do(func() { keyVal, keyErr = loadAppKey() })
-	return keyVal, keyErr
+	keyMu.Lock()
+	if keyVal == nil && keyLoading == nil && time.Since(keyFailed) >= keyRetry {
+		done := make(chan struct{})
+		keyLoading = done
+		go func() {
+			v, err := loadAppKey()
+			keyMu.Lock()
+			keyVal, keyErr, keyLoading = v, err, nil
+			if err != nil {
+				keyFailed = time.Now()
+			}
+			keyMu.Unlock()
+			close(done)
+		}()
+	}
+	val, err, loading := keyVal, keyErr, keyLoading
+	keyMu.Unlock()
+	if loading == nil {
+		return val, err
+	}
+	select {
+	case <-loading:
+		keyMu.Lock()
+		defer keyMu.Unlock()
+		return keyVal, keyErr
+	case <-time.After(keyCallerWait):
+		return nil, errors.New("waiting for keychain access")
+	}
 }
 
 func loadAppKey() ([]byte, error) {
-	out, err := exec.Command("security", "find-generic-password", "-w", "-s", "Claude Safe Storage").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), keyWait)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "security", "find-generic-password", "-w", "-s", "Claude Safe Storage").Output()
 	if err != nil {
 		return nil, errors.New("could not read \"Claude Safe Storage\" from the keychain")
 	}

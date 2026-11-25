@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -8,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -37,6 +39,37 @@ func claudeDesktop() desktop {
 	return desktop{dir: best}
 }
 
+// thirdPartyConfigPath is where the app keeps its deployment mode, see thirdparty.go.
+func thirdPartyConfigPath() string {
+	return filepath.Join(os.Getenv("LOCALAPPDATA"), "Claude-3p", "claude_desktop_config.json")
+}
+
+// readClaudePolicy reports whether the Claude policy key exists for the
+// machine or the user, and the first inferenceProvider set in them.
+func readClaudePolicy() (set bool, provider string) {
+	for _, root := range []registry.Key{registry.LOCAL_MACHINE, registry.CURRENT_USER} {
+		k, err := registry.OpenKey(root, `SOFTWARE\Policies\Claude`, registry.QUERY_VALUE)
+		if err != nil {
+			continue
+		}
+		set = true
+		if provider == "" {
+			provider, _, _ = k.GetStringValue("inferenceProvider")
+		}
+		k.Close()
+	}
+	return set, provider
+}
+
+// uiLanguage is the user's first display language, like "zh-CN".
+func uiLanguage() string {
+	langs, err := windows.GetUserPreferredUILanguages(windows.MUI_LANGUAGE_NAME)
+	if err != nil || len(langs) == 0 {
+		return ""
+	}
+	return langs[0]
+}
+
 // insideStoreApp reports whether this process was started by a Microsoft
 // Store app, for example from a Claude Code terminal. Such processes get the
 // app's redirected AppData, which shows as a probe file landing in a package
@@ -52,22 +85,36 @@ func insideStoreApp() bool {
 	return len(hits) > 0
 }
 
+// startedByClaude reports whether Claude started this process, for example
+// from a Claude Code terminal, by Claude Code's variables or a claude.exe
+// among the ancestors.
+func startedByClaude() bool {
+	if claudeEnvSet() {
+		return true
+	}
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return false
+	}
+	defer windows.CloseHandle(snap)
+	procs := map[uint32]proc{}
+	var e windows.ProcessEntry32
+	e.Size = uint32(unsafe.Sizeof(e))
+	for err = windows.Process32First(snap, &e); err == nil; err = windows.Process32Next(snap, &e) {
+		procs[e.ProcessID] = proc{e.ParentProcessID, windows.UTF16ToString(e.ExeFile[:])}
+	}
+	return claudeAncestor(uint32(os.Getpid()), procs)
+}
+
 // relaunchOutsideDesktop starts the switcher again through Explorer when it
-// runs inside the Store app, so it does not share the app's redirections.
-// A marker file stops a relaunch loop should the probe ever misjudge.
+// runs inside the Store app, so it does not share the app's redirections, or
+// when Claude started it, so quitting Claude does not end it. Explorer's
+// environment carries none of Claude Code's variables.
 func relaunchOutsideDesktop(dataDir string) bool {
-	if !insideStoreApp() {
+	if !insideStoreApp() && !startedByClaude() {
 		return false
 	}
-	marker := filepath.Join(dataDir, "relaunched")
-	if info, err := os.Stat(marker); err == nil && time.Since(info.ModTime()) < 30*time.Second {
-		return false
-	}
-	exe, err := os.Executable()
-	if err != nil || os.WriteFile(marker, nil, 0o600) != nil {
-		return false
-	}
-	return start("explorer.exe", exe) == nil
+	return relaunchOnce(dataDir, func(exe string) error { return start("explorer.exe", exe) })
 }
 
 // desktopProcesses returns the running Claude desktop processes and the app's
@@ -197,14 +244,23 @@ func pidArgs(pids []uint32) []string {
 }
 
 func waitGone(timeout time.Duration) bool {
-	for deadline := time.Now().Add(timeout); time.Now().Before(deadline); time.Sleep(300 * time.Millisecond) {
+	for deadline := time.Now().Add(timeout); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
 		if !desktopRunning() {
-			// Give the file system a moment to release the cookie store.
-			time.Sleep(700 * time.Millisecond)
+			waitReleased(claudeDesktop().cookieFiles(), 700*time.Millisecond)
 			return true
 		}
 	}
 	return false
+}
+
+// waitReleased waits, up to limit, until no process holds any of files open,
+// which the file system can take a moment after the app's processes are gone.
+func waitReleased(files []string, limit time.Duration) {
+	for deadline := time.Now().Add(limit); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if !slices.ContainsFunc(files, heldOpen) {
+			return
+		}
+	}
 }
 
 var appIDPattern = regexp.MustCompile(`<Application\s+Id="([^"]+)"`)
@@ -214,6 +270,18 @@ var appIDPattern = regexp.MustCompile(`<Application\s+Id="([^"]+)"`)
 func startDesktop(exe string) error {
 	if aumid := storeAppID(exe); aumid != "" {
 		return start("explorer.exe", `shell:AppsFolder\`+aumid)
+	}
+	// A Squirrel install runs from app-<version>\ and keeps the previous
+	// version next to it after an update. Its launcher in the folder above
+	// starts the newest one.
+	if exe != "" && strings.HasPrefix(strings.ToLower(filepath.Base(filepath.Dir(exe))), "app-") {
+		root := filepath.Dir(filepath.Dir(exe))
+		launcher := filepath.Join(root, filepath.Base(exe))
+		if _, err := os.Stat(filepath.Join(root, "Update.exe")); err == nil {
+			if _, err := os.Stat(launcher); err == nil {
+				return start(launcher)
+			}
+		}
 	}
 	if exe != "" {
 		if _, err := os.Stat(exe); err == nil {
@@ -262,12 +330,19 @@ func shellOpen(target string) { _ = start("explorer.exe", target) }
 // launch starts the switcher at exe on its own.
 func launch(exe string) error { return start(exe) }
 
-// askToQuitOld tells the user to quit a switcher from before 0.3.3, which
-// holds the instance port without answering hello.
-func askToQuitOld() {
-	title, _ := windows.UTF16PtrFromString("Claude Account Switcher")
-	text, _ := windows.UTF16PtrFromString("An older Claude Account Switcher is still running. Choose Quit in its tray menu, then start this one again.")
-	windows.MessageBox(0, text, title, windows.MB_OK|windows.MB_ICONINFORMATION)
+// showNotice shows text in a message box and waits until it is closed.
+func showNotice(text string) { messageBox(text, windows.MB_OK|windows.MB_ICONINFORMATION) }
+
+// messageBox shows text in a message box with the switcher's title, waits
+// until it is closed and returns the button clicked, 0 if it could not open.
+func messageBox(text string, flags uint32) int32 {
+	title, _ := windows.UTF16PtrFromString(tr.Title)
+	body, _ := windows.UTF16PtrFromString(text)
+	r, err := windows.MessageBox(0, body, title, flags)
+	if r == 0 {
+		log.Printf("message box: %v", err)
+	}
+	return r
 }
 
 const runKey = `Software\Microsoft\Windows\CurrentVersion\Run`
@@ -330,10 +405,19 @@ func hidden(cmd *exec.Cmd) *exec.Cmd {
 	return cmd
 }
 
-func run(name string, args ...string) { _ = hidden(exec.Command(name, args...)).Run() }
+// A helper command that hangs must not hold up a switch with Claude closed.
+const commandTimeout = 15 * time.Second
+
+func run(name string, args ...string) {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	_ = hidden(exec.CommandContext(ctx, name, args...)).Run()
+}
 
 func output(name string, args ...string) (string, error) {
-	out, err := hidden(exec.Command(name, args...)).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	out, err := hidden(exec.CommandContext(ctx, name, args...)).Output()
 	return string(out), err
 }
 

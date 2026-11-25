@@ -136,7 +136,7 @@ func TestSyncSessions(t *testing.T) {
 	session("b", "ob", "two", 200)
 	session("b", "ob", "mine", 50)
 
-	n, err := syncSessions(root, "b", "ob")
+	n, err := syncSessions(root, "b", "ob", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,12 +157,12 @@ func TestSyncSessions(t *testing.T) {
 	if at, _ := lastActivity(filepath.Join(target, "local_two.json")); at != 300 {
 		t.Fatalf("two not refreshed, activity %d", at)
 	}
-	if n, _ := syncSessions(root, "b", "ob"); n != 0 {
+	if n, _ := syncSessions(root, "b", "ob", ""); n != 0 {
 		t.Fatalf("second sync wrote %d, want 0", n)
 	}
 
 	// A brand new account gets its folder created.
-	if n, _ := syncSessions(root, "c", "oc"); n != 3 {
+	if n, _ := syncSessions(root, "c", "oc", ""); n != 3 {
 		t.Fatalf("new account got %d, want 3", n)
 	}
 }
@@ -337,9 +337,9 @@ func TestAutoNote(t *testing.T) {
 	}
 }
 
-func TestLastChatWrite(t *testing.T) {
+func TestNewestChat(t *testing.T) {
 	root := t.TempDir()
-	if got := lastChatWrite(root); !got.IsZero() {
+	if got := newestChat(root).at; !got.IsZero() {
 		t.Fatalf("no chats, got %v", got)
 	}
 	old, recent := filepath.Join(root, "a", "oa", "local_one.json"), filepath.Join(root, "b", "ob", "local_two.json")
@@ -350,8 +350,8 @@ func TestLastChatWrite(t *testing.T) {
 	os.Chtimes(old, at.Add(-time.Hour), at.Add(-time.Hour))
 	os.Chtimes(recent, at, at)
 	os.Chtimes(filepath.Join(root, "b", "ob", "deleted_three"), time.Now(), time.Now())
-	if got := lastChatWrite(root); !got.Equal(at) {
-		t.Fatalf("got %v, want %v", got, at)
+	if got := newestChat(root); !got.at.Equal(at) || got.newest != recent || got.n != 2 {
+		t.Fatalf("got %v, want %s at %v of 2", got, recent, at)
 	}
 }
 

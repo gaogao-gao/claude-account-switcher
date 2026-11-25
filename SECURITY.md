@@ -5,7 +5,7 @@ The switcher handles Claude sign-in tokens, so security reports matter a lot her
 ## Reporting a problem
 
 Please **do not open a public issue.** Report it privately instead:
-[Report a vulnerability](https://github.com/SnlperStripes/claude-account-switcher/security/advisories/new).
+[Report a vulnerability](https://github.com/gaogao-gao/claude-account-switcher/security/advisories/new).
 
 Include what you found, how to reproduce it, and which version you tested. You should get an answer within a week.
 
