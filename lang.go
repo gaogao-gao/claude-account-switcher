@@ -12,6 +12,8 @@ type texts struct {
 	Settings, StartAtLogin, LockSkills, LockSkillsTip                   string
 	SyncChats, SyncChatsTip                                             string
 	ImportChats, ImportChatsTip, OpenFolder, Quit                       string
+	CheckUpdate, CheckUpdateTip, CheckingUpdate, UpToDate               string
+	Downloading, StartingNew, UpdateFailed                              string
 	Switching, SignInOther, Importing, QuittingAfter                    string
 	UsageUnknown, Week, Until, Resets, SignedOut                        string
 	NoteFull, NoteSpend, LastAccount                                    string
@@ -45,6 +47,13 @@ var english = texts{
 	ImportChats:    "Import chats from all accounts",
 	ImportChatsTip: "Restart Claude so every chat shows up in this account",
 	OpenFolder:     "Open data folder",
+	CheckUpdate:    "Check for updates (now %s)",
+	CheckUpdateTip: "Ask GitHub for the latest release and install it",
+	CheckingUpdate: "Checking for updates…",
+	UpToDate:       "Up to date (%s)",
+	Downloading:    "Downloading version %s…",
+	StartingNew:    "Starting version %s…",
+	UpdateFailed:   "Update failed: ",
 	Quit:           "Quit",
 	Switching:      "Switching to %s…",
 	SignInOther:    "Sign in with the other account in Claude",
@@ -89,6 +98,13 @@ var chinese = texts{
 	ImportChats:    "导入所有账号的对话",
 	ImportChatsTip: "重启 Claude，让所有对话都出现在当前账号中",
 	OpenFolder:     "打开数据文件夹",
+	CheckUpdate:    "检查更新（当前 %s）",
+	CheckUpdateTip: "从 GitHub 获取最新版本并安装",
+	CheckingUpdate: "正在检查更新…",
+	UpToDate:       "已是最新版本（%s）",
+	Downloading:    "正在下载 %s…",
+	StartingNew:    "正在启动 %s…",
+	UpdateFailed:   "更新失败：",
 	Quit:           "退出",
 	Switching:      "正在切换到 %s…",
 	SignInOther:    "请在 Claude 中登录另一个账号",

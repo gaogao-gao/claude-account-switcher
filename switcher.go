@@ -73,10 +73,6 @@ type State struct {
 	// SyncThirdParty syncs the chats with the app's third-party profile; see
 	// crossprofile.go.
 	SyncThirdParty bool `json:"syncThirdParty"`
-	// The daily check for a new release is on unless this is set by hand.
-	NoUpdateCheck bool      `json:"noUpdateCheck,omitempty"`
-	UpdateChecked time.Time `json:"updateChecked,omitempty"`
-	LatestVersion string    `json:"latestVersion,omitempty"`
 }
 
 // switchCause says why a switch happened.
@@ -820,8 +816,6 @@ type snapshot struct {
 	ThirdPartyItem string
 	LockSkills     bool
 	SyncChats      bool
-	// Update is a version newer than this one, empty while there is none.
-	Update string
 }
 
 func (s *switcher) snapshot() snapshot {
@@ -830,9 +824,6 @@ func (s *switcher) snapshot() snapshot {
 	snap := snapshot{Active: s.active, AutoSwitch: s.st.AutoSwitch, SpendWeekly: s.st.SpendWeekly, Threshold: s.st.Threshold,
 		Status: s.status, Note: s.autoNote(time.Now()), Busy: s.busy.Load(), ThirdParty: s.thirdParty, LockSkills: s.st.LockSkills,
 		SyncChats: s.st.SyncThirdParty, ThirdPartyItem: s.thirdPartyItem}
-	if updatesEnabled && !s.st.NoUpdateCheck && newerVersion(s.st.LatestVersion, version) {
-		snap.Update = s.st.LatestVersion
-	}
 	for _, a := range s.st.Accounts {
 		snap.Accounts = append(snap.Accounts, *a)
 	}

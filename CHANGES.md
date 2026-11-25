@@ -7,6 +7,14 @@ with Anthropic or the upstream author. Apache License 2.0, see `LICENSE` and `NO
 本项目是 SnlperStripes 的 [Claude Account Switcher](https://github.com/SnlperStripes/claude-account-switcher)
 v0.3.6 的修改版，由 gaogao-gao 修改。它不是官方版本，与 Anthropic 及上游作者无关。采用 Apache License 2.0，参见 `LICENSE` 和 `NOTICE`。
 
+## 0.3.6-ext.2
+
+- **Settings ▸ Check for updates** shows the running version. A click asks this repository's GitHub
+  releases for the latest one; on Windows a newer build is downloaded, checked against its
+  `.sha256` and started in place of the old one, on macOS the release page opens. Upstream's
+  releases are never offered, and nothing is checked in the background.
+- **设置 ▸ 检查更新** 显示当前版本。点击后从本仓库的 GitHub 发布中获取最新版本：Windows 上下载更新的版本、按 `.sha256` 校验并替换旧版本启动，macOS 上打开发布页面。不会提供上游的版本，也不会在后台检查。
+
 ## 0.3.6-ext.1
 
 Changes against upstream v0.3.6. / 相对上游 v0.3.6 的改动。
@@ -111,6 +119,6 @@ Changes against upstream v0.3.6. / 相对上游 v0.3.6 的改动。
   of this fork replace older ones; an upstream build is told to stay out, and the menu asks the user
   to quit one of them. A fork build that finds another switcher running says so in a dialog.
 - 版本 `0.3.6-ext.1`；模块路径 `github.com/gaogao-gao/claude-account-switcher`。本分支的新版本会替换旧版本；上游版本启动时会被拒绝，菜单会提示用户退出其中一个。本分支发现已有切换器在运行时会弹窗说明。
-- Self-update is off and points to this repository only. Upstream's website (`docs/`) and winget
-  manifests are removed; Windows resources describe the fork.
-- 自动更新关闭，且只指向本仓库。移除了上游的网站（`docs/`）和 winget 清单；Windows 资源信息标明为分支版本。
+- Self-update is off and points to this repository only (from ext.2 on demand, see above).
+  Upstream's website (`docs/`) and winget manifests are removed; Windows resources describe the fork.
+- 自动更新关闭，且只指向本仓库（ext.2 起改为手动检查，见上）。移除了上游的网站（`docs/`）和 winget 清单；Windows 资源信息标明为分支版本。

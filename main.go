@@ -17,7 +17,7 @@ import (
 	"fyne.io/systray"
 )
 
-const version = "0.3.6-ext.1"
+const version = "0.3.6-ext.2"
 
 func main() {
 	// The dialog process started by askInDialogProcess.

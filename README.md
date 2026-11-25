@@ -92,8 +92,10 @@ SmartScreen asks once (**More info ▸ Run anyway**); on macOS, run
 `xattr -dr com.apple.quarantine "Claude Account Switcher.app"` once. Each build has a `.sha256`
 file next to it.
 
-To update, start the newer build: it asks the running one to quit and takes over. Your accounts
-and settings stay in the data folder. There is no self-update.
+To update, click **Settings ▸ Check for updates**: on Windows it downloads the latest release of
+this repository, checks it against its `.sha256` and restarts on it; on macOS it opens the release
+page. Starting a newer build by hand works too: it asks the running one to quit and takes over.
+Your accounts and settings stay in the data folder. Nothing is checked in the background.
 
 **中文**
 
@@ -104,7 +106,7 @@ and settings stay in the data folder. There is no self-update.
 
 然后在菜单中开启 **设置 ▸ 开机时启动**。这些版本没有代码签名：Windows 上 SmartScreen 会提示一次（**更多信息 ▸ 仍要运行**）；macOS 上需执行一次 `xattr -dr com.apple.quarantine "Claude Account Switcher.app"`。每个版本旁都附有 `.sha256` 文件。
 
-更新时直接启动新版本即可：它会让正在运行的旧版本退出并接替。账号和设置保留在数据文件夹中。没有自动更新。
+更新时点击 **设置 ▸ 检查更新**：Windows 上会下载本仓库的最新版本，按 `.sha256` 校验后自动重启到新版本；macOS 上会打开发布页面。手动启动新版本也可以：它会让正在运行的旧版本退出并接替。账号和设置保留在数据文件夹中。不会在后台检查更新。
 
 ## First run / 首次使用
 
@@ -234,7 +236,7 @@ WebView2, with a plain dialog as fallback; on macOS it uses WebKit.
 | --- | --- |
 | Data folder | `~/.claude-account-switcher` (`%USERPROFILE%\.claude-account-switcher` on Windows), **Open data folder** in the menu: saved sign-ins, `state.json`, backups, `deleted-chats/`, `skill-backups/`, sync records and the log |
 | Tokens | Stored exactly as Claude encrypted them; never written in plain text, never sent anywhere but `api.anthropic.com` |
-| Network | `api.anthropic.com` for profiles and usage, nothing else. No telemetry, no update check |
+| Network | `api.anthropic.com` for profiles and usage; GitHub only when you click **Check for updates**. No telemetry |
 | Claude's files | `config.json` sign-in entries and the cookie file are saved and restored; chat entries, `spaces.json`, scheduled tasks, Local Storage sidebar settings and pinned chats are merged. Each is backed up before it is rewritten. Local Storage is only written while Claude has it closed |
 | Remove an account | Quit the switcher, delete its folder under `accounts/` and its entry in `state.json` |
 | Uninstall | Turn off **Start at login**, quit, delete the program and the data folder |
@@ -247,7 +249,7 @@ WebView2, with a plain dialog as fallback; on macOS it uses WebKit.
 | --- | --- |
 | 数据文件夹 | `~/.claude-account-switcher`（Windows 上为 `%USERPROFILE%\.claude-account-switcher`），菜单中的 **打开数据文件夹**：保存的登录、`state.json`、备份、`deleted-chats/`、`skill-backups/`、同步记录和日志 |
 | 令牌 | 按 Claude 加密后的原样保存；从不以明文写入，除 `api.anthropic.com` 外不发送到任何地方 |
-| 网络 | 仅访问 `api.anthropic.com` 获取账号信息和用量。没有遥测，也不检查更新 |
+| 网络 | 访问 `api.anthropic.com` 获取账号信息和用量；只有点击 **检查更新** 时才访问 GitHub。没有遥测 |
 | Claude 的文件 | 保存并恢复 `config.json` 中的登录条目和 Cookie 文件；合并对话条目、`spaces.json`、定时任务、Local Storage 中的侧边栏设置和置顶对话。每项改写前都会备份。Local Storage 只在 Claude 未打开它时写入 |
 | 删除账号 | 退出切换器，删除 `accounts/` 下对应的文件夹以及 `state.json` 中的条目 |
 | 卸载 | 关闭 **开机时启动**，退出，删除程序和数据文件夹 |

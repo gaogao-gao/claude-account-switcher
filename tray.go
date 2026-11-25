@@ -18,7 +18,6 @@ var thresholds = []float64{90, 94, 96, 98}
 type tray struct {
 	s        *switcher
 	status   *systray.MenuItem
-	update   *systray.MenuItem
 	accounts [maxAccounts]*systray.MenuItem
 	third    *systray.MenuItem // the third-party provider; see thirdparty.go
 	add      *systray.MenuItem
@@ -42,8 +41,6 @@ func (t *tray) onReady() {
 	t.status = systray.AddMenuItem("", "")
 	t.status.Disable()
 	t.status.Hide()
-	t.update = systray.AddMenuItem("", "Download the new version and restart on it")
-	t.update.Hide()
 	for i := range t.accounts {
 		t.accounts[i] = systray.AddMenuItemCheckbox("", tr.SwitchTip, false)
 		t.accounts[i].Hide()
@@ -72,6 +69,7 @@ func (t *tray) onReady() {
 	t.syncThird = settings.AddSubMenuItemCheckbox(tr.SyncChats, tr.SyncChatsTip, false)
 	t.importNow = settings.AddSubMenuItem(tr.ImportChats, tr.ImportChatsTip)
 	folder := settings.AddSubMenuItem(tr.OpenFolder, "")
+	update := settings.AddSubMenuItem(fmt.Sprintf(tr.CheckUpdate, version), tr.CheckUpdateTip)
 	systray.AddSeparator()
 	quit := systray.AddMenuItem(tr.Quit, "")
 
@@ -120,10 +118,8 @@ func (t *tray) onReady() {
 				go t.s.setLockSkills(!t.lockSkills.Checked())
 			case <-t.syncThird.ClickedCh:
 				t.s.setSyncThirdParty(!t.syncThird.Checked())
-			case <-t.update.ClickedCh:
-				if v := t.s.snapshot().Update; v != "" {
-					go t.s.installUpdate(context.Background(), v)
-				}
+			case <-update.ClickedCh:
+				go t.s.updateNow(context.Background())
 			case <-folder.ClickedCh:
 				shellOpen(t.s.dir)
 			case <-quit.ClickedCh:
@@ -158,7 +154,6 @@ func (t *tray) onReady() {
 	}()
 	t.s.onChange()
 	go t.loop()
-	go t.updateLoop()
 }
 
 // loop runs refresh every few seconds while a new sign-in is expected,
@@ -179,16 +174,6 @@ func (t *tray) loop() {
 	}
 }
 
-// updateLoop looks for a new release a minute after start, then every hour;
-// checkUpdate decides whether a day has passed since the last answer.
-func (t *tray) updateLoop() {
-	time.Sleep(time.Minute)
-	for {
-		t.s.checkUpdate(context.Background())
-		time.Sleep(time.Hour)
-	}
-}
-
 func (t *tray) render() {
 	snap := t.s.snapshot()
 	now := time.Now()
@@ -202,12 +187,6 @@ func (t *tray) render() {
 		t.status.Show()
 	default:
 		t.status.Hide()
-	}
-	if snap.Update != "" {
-		t.update.SetTitle("Version " + snap.Update + " is out, click to update")
-		t.update.Show()
-	} else {
-		t.update.Hide()
 	}
 	if len(snap.Accounts) == 0 && snap.Status == "" && !snap.ThirdParty {
 		t.status.SetTitle(tr.SignIn)

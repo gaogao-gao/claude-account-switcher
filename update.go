@@ -19,19 +19,14 @@ import (
 	"time"
 )
 
-const (
-	// updatesEnabled is off in this fork: upstream's releases would
-	// replace it. Nothing is checked and no update is offered.
-	updatesEnabled = false
-
-	repoURL = "https://github.com/gaogao-gao/claude-account-switcher"
-	// GitHub is asked for the latest release at most this often.
-	updateEvery = 24 * time.Hour
-)
+// Updates come from this fork's releases only, and only when the user asks:
+// nothing is checked in the background.
+const repoURL = "https://github.com/gaogao-gao/claude-account-switcher"
 
 var latestAPI = "https://api.github.com/repos/gaogao-gao/claude-account-switcher/releases/latest"
 
-// latestRelease asks GitHub for the version of the latest release, like "0.3.0".
+// latestRelease asks GitHub for the version of the latest release, like
+// "0.3.6-ext.2".
 // Nothing about the user or their accounts goes along.
 func latestRelease(ctx context.Context) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, latestAPI, nil)
@@ -55,7 +50,7 @@ func latestRelease(ctx context.Context) (string, error) {
 		return "", err
 	}
 	v := strings.TrimPrefix(body.Tag, "v")
-	if parseVersion(v) == nil {
+	if _, _, ok := splitFork(v); !ok {
 		return "", fmt.Errorf("latest release: unexpected tag %q", body.Tag)
 	}
 	return v, nil
@@ -92,28 +87,43 @@ func newerVersion(a, b string) bool {
 	return false
 }
 
-// checkUpdate asks GitHub for the latest release when the check is on and
-// the last answer is a day old. A failed check is tried again next time.
-func (s *switcher) checkUpdate(ctx context.Context) {
-	s.mu.Lock()
-	due := updatesEnabled && !s.st.NoUpdateCheck && time.Since(s.st.UpdateChecked) >= updateEvery
-	s.mu.Unlock()
-	if !due {
+// updateNow asks GitHub for the latest release and installs it when it is
+// newer than this build. Where the release has no file to swap in, its page
+// opens instead.
+func (s *switcher) updateNow(ctx context.Context) {
+	if !updating.CompareAndSwap(false, true) {
 		return
 	}
+	defer updating.Store(false)
+	s.setStatus(tr.CheckingUpdate)
 	v, err := latestRelease(ctx)
-	if err != nil {
-		log.Printf("update check: %v", err)
-		return
+	switch {
+	case err != nil:
+		s.setStatus(tr.UpdateFailed + err.Error())
+	case !newerBuild(v, version):
+		s.flashStatus(fmt.Sprintf(tr.UpToDate, version))
+	case releaseAsset() == "":
+		s.setStatus("")
+		shellOpen(releasesURL + "/latest")
+	default:
+		s.installUpdate(ctx, v)
 	}
-	if newerVersion(v, version) {
-		log.Printf("version %s is available", v)
-	}
-	s.mu.Lock()
-	s.st.UpdateChecked, s.st.LatestVersion = time.Now(), v
-	s.saveState()
-	s.mu.Unlock()
-	s.onChange()
+}
+
+// flashStatus shows msg for a few seconds.
+func (s *switcher) flashStatus(msg string) {
+	s.setStatus(msg)
+	time.AfterFunc(10*time.Second, func() {
+		s.mu.Lock()
+		same := s.status == msg
+		if same {
+			s.status = ""
+		}
+		s.mu.Unlock()
+		if same {
+			s.onChange()
+		}
+	})
 }
 
 var (
@@ -122,13 +132,11 @@ var (
 	updating    atomic.Bool
 )
 
-// releaseAsset is the name of this platform's file in a release.
+// releaseAsset is the name of this platform's file in a release, "" where
+// the release has none to swap in: the macOS build is an app in a zip.
 func releaseAsset() string {
-	switch runtime.GOOS {
-	case "windows":
+	if runtime.GOOS == "windows" {
 		return "claude-account-switcher-windows-amd64.exe"
-	case "darwin":
-		return "claude-account-switcher-macos"
 	}
 	return ""
 }
@@ -138,11 +146,7 @@ func releaseAsset() string {
 // downloads itself carries no mark of the web, so SmartScreen and Gatekeeper
 // stay quiet. When that does not work, the download page opens instead.
 func (s *switcher) installUpdate(ctx context.Context, v string) {
-	if !updating.CompareAndSwap(false, true) {
-		return
-	}
-	defer updating.Store(false)
-	s.setStatus("Downloading version " + v + "…")
+	s.setStatus(fmt.Sprintf(tr.Downloading, v))
 	err := func() error {
 		exe, err := os.Executable()
 		if err != nil {
@@ -165,11 +169,11 @@ func (s *switcher) installUpdate(ctx context.Context, v string) {
 		return nil
 	}()
 	if err != nil {
-		s.setStatus("Update failed: " + err.Error())
+		s.setStatus(tr.UpdateFailed + err.Error())
 		shellOpen(releasesURL + "/latest")
 		return
 	}
-	s.setStatus("Starting version " + v + "…")
+	s.setStatus(fmt.Sprintf(tr.StartingNew, v))
 }
 
 // fetchRelease downloads this platform's file of version v and checks it

@@ -4,13 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestNewerVersion(t *testing.T) {
@@ -34,8 +34,8 @@ func TestNewerVersion(t *testing.T) {
 	}
 }
 
-func TestCheckUpdate(t *testing.T) {
-	tag, calls := "v99.0.0", 0
+func TestUpdateNow(t *testing.T) {
+	tag, calls := "v"+version, 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.Write([]byte(`{"tag_name":"` + tag + `"}`))
@@ -45,44 +45,20 @@ func TestCheckUpdate(t *testing.T) {
 	latestAPI = srv.URL
 
 	s := &switcher{dir: t.TempDir(), onChange: func() {}}
-	if !updatesEnabled {
-		s.checkUpdate(context.Background())
-		if got := s.snapshot().Update; calls != 0 || got != "" {
-			t.Fatalf("updates are off, yet %d checks and update %q", calls, got)
+	s.updateNow(context.Background())
+	if want := fmt.Sprintf(tr.UpToDate, version); calls != 1 || s.snapshot().Status != want {
+		t.Fatalf("%d checks, status %q, want %q", calls, s.snapshot().Status, want)
+	}
+
+	// Upstream's releases are not this fork's: never offered.
+	for _, tag = range []string{"v99.0.0", "nightly"} {
+		if v, err := latestRelease(context.Background()); err == nil {
+			t.Fatalf("tag %s read as release %s", tag, v)
 		}
-		return
 	}
-	s.checkUpdate(context.Background())
-	if got := s.snapshot().Update; got != "99.0.0" {
-		t.Fatalf("update = %q, want 99.0.0", got)
-	}
-	s.checkUpdate(context.Background())
-	if calls != 1 {
-		t.Fatalf("asked GitHub %d times within a day", calls)
-	}
-
-	s.st.NoUpdateCheck = true
-	if got := s.snapshot().Update; got != "" {
-		t.Fatalf("update shown with the check off: %q", got)
-	}
-	s.st.UpdateChecked = time.Time{}
-	s.checkUpdate(context.Background())
-	if calls != 1 {
-		t.Fatal("asked GitHub with the check off")
-	}
-
-	tag = "v" + version
-	s.st.NoUpdateCheck = false
-	s.checkUpdate(context.Background())
-	if got := s.snapshot().Update; calls != 2 || got != "" {
-		t.Fatalf("after turning the check on: %d calls, update %q", calls, got)
-	}
-
-	tag = "nightly"
-	s.st.UpdateChecked = time.Time{}
-	s.checkUpdate(context.Background())
-	if !s.st.UpdateChecked.IsZero() {
-		t.Fatal("an odd tag counted as a check")
+	tag = "v0.3.6-ext.99"
+	if v, err := latestRelease(context.Background()); err != nil || !newerBuild(v, version) {
+		t.Fatalf("latest release = %q, %v, want a newer build", v, err)
 	}
 }
 
