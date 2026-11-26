@@ -265,17 +265,18 @@ Go 1.26 or newer.
 ```bash
 go vet ./...
 go test ./...
-go build -ldflags "-H=windowsgui -s -w" -o claude-account-switcher.exe .   # Windows
-CGO_ENABLED=1 go build -o claude-account-switcher .                        # macOS
+go build -ldflags "-H=windowsgui -s -w" -o claude-account-switcher.exe ./cmd/claude-account-switcher   # Windows
+CGO_ENABLED=1 go build -o claude-account-switcher ./cmd/claude-account-switcher                        # macOS
 ```
 
-Release builds come from `.github/workflows/build.yml` on a `v*` tag. Dependencies beyond the
+The sources are in `cmd/claude-account-switcher/`. Release builds come from
+`.github/workflows/build.yml` on a `v*` tag, with this version's section of `CHANGES.md` as notes. Dependencies beyond the
 standard library: `fyne.io/systray`, `jchv/go-webview2` (Windows), `webview/webview_go` (macOS),
 `syndtr/goleveldb` and `golang.org/x/sys`.
 
 **中文**
 
-需要 Go 1.26 或更新版本。构建命令见上方代码块。发布版本由 `.github/workflows/build.yml` 在推送 `v*` 标签时构建。标准库以外的依赖：`fyne.io/systray`、`jchv/go-webview2`（Windows）、`webview/webview_go`（macOS）、`syndtr/goleveldb` 和 `golang.org/x/sys`。
+需要 Go 1.26 或更新版本。构建命令见上方代码块。源码在 `cmd/claude-account-switcher/`。发布版本由 `.github/workflows/build.yml` 在推送 `v*` 标签时构建，发布说明取自 `CHANGES.md` 中对应版本的一节。标准库以外的依赖：`fyne.io/systray`、`jchv/go-webview2`（Windows）、`webview/webview_go`（macOS）、`syndtr/goleveldb` 和 `golang.org/x/sys`。
 
 ## Caveats / 注意事项
 

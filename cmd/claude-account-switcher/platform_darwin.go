@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -122,36 +121,12 @@ func launchAgentPath() string {
 	return filepath.Join(home, "Library", "LaunchAgents", launchAgentLabel+".plist")
 }
 
-// oldLaunchAgent returns the login item that earlier builds of this fork wrote
-// under upstream's label, or "" when there is none for this executable. One
-// that starts another program, such as an upstream build, is left alone.
-func oldLaunchAgent() string {
-	home, _ := os.UserHomeDir()
-	path := filepath.Join(home, "Library", "LaunchAgents", "io.github.snlperstripes.claude-account-switcher.plist")
-	exe, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	data, err := os.ReadFile(path)
-	if err != nil || !strings.Contains(string(data), "<string>"+html.EscapeString(exe)+"</string>") {
-		return ""
-	}
-	return path
-}
-
 func autostartEnabled() bool {
-	if _, err := os.Stat(launchAgentPath()); err == nil {
-		return true
-	}
-	return oldLaunchAgent() != ""
+	_, err := os.Stat(launchAgentPath())
+	return err == nil
 }
 
 func setAutostart(on bool) error {
-	if old := oldLaunchAgent(); old != "" {
-		if err := os.Remove(old); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-	}
 	if !on {
 		if err := os.Remove(launchAgentPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err

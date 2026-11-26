@@ -14,27 +14,34 @@ Go 1.26 or newer.
 ```bash
 go vet ./...
 go test ./...
-go build -ldflags "-H=windowsgui -s -w" -o claude-account-switcher.exe .   # Windows
-CGO_ENABLED=1 go build -o claude-account-switcher .                        # macOS
+go build -ldflags "-H=windowsgui -s -w" -o claude-account-switcher.exe ./cmd/claude-account-switcher   # Windows
+CGO_ENABLED=1 go build -o claude-account-switcher ./cmd/claude-account-switcher                        # macOS
 ```
 
 Every pull request runs vet and tests on Windows and macOS.
 
 ## Where things are
 
+All Go code is one `main` package in `cmd/claude-account-switcher/`; each file has its tests next
+to it in `*_test.go`.
+
 | File | What it does |
 | --- | --- |
 | `main.go` | Start-up, flags, log |
-| `tray.go` | The tray menu |
+| `tray.go`, `lang.go`, `icon.go` | The tray menu, its English and Chinese texts, the usage ring |
 | `switcher.go` | Accounts, `state.json`, the switch itself, auto-switch |
-| `profiles.go` | Saving and restoring a sign-in, backups |
-| `sessions.go` | Copying the Claude Code chat list between accounts |
-| `usage.go` | Profile and usage requests to `api.anthropic.com`, polling, backoff |
-| `update.go` | The release check on GitHub (off in this fork) |
-| `desktop.go` | Reading Claude's data folder: `config.json`, cookies, the active account |
+| `profiles.go`, `desktop.go` | Saving and restoring a sign-in, backups; reading Claude's data folder |
 | `crypto_*.go` | Decrypting Claude's token cache (DPAPI, keychain) |
-| `platform_*.go` | Finding, quitting and starting Claude, start at login, OS specifics |
-| `icon.go` | The usage ring in the tray |
+| `usage.go` | Profile and usage requests to `api.anthropic.com`, polling, backoff |
+| `sessions.go`, `chatstate.go`, `merge3.go` | The chat list and each chat's archive, pin and title state, three-way merges |
+| `tasks.go`, `spaces.go`, `localstorage.go`, `lsdb.go` | Scheduled tasks, projects, sidebar settings in Local Storage |
+| `thirdparty.go`, `crossprofile.go`, `pins.go` | The third-party entry and syncing chats and pins with it |
+| `skills*.go` | Locking built-in skills |
+| `resume.go`, `resume.html` | The window that continues chats a switch stopped |
+| `instance.go`, `relaunch.go` | One switcher at a time; leaving Claude's process tree |
+| `update.go` | **Check for updates**: this repository's latest release, download, swap, restart |
+| `platform_*.go`, `dialog_*.go`, `webview_*.go`, `lslock_*.go` | Finding, quitting and starting Claude, start at login, OS specifics |
+| `winres/` | Windows version info and manifest for the exe |
 
 ## Ground rules
 

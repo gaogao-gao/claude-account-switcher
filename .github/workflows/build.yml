@@ -33,6 +33,7 @@ jobs:
       - name: Windows resources
         if: runner.os == 'Windows'
         shell: bash
+        working-directory: cmd/claude-account-switcher
         run: |
           v=$(sed -n 's/^const version = "\(.*\)"/\1/p' main.go)
           v=${v%%-*} # numbers only: 0.3.6-ext.1 is 0.3.6
@@ -42,8 +43,8 @@ jobs:
         run: |
           mkdir -p dist
           if [ "$RUNNER_OS" = macOS ]; then
-            CGO_ENABLED=1 GOARCH=arm64 go build -ldflags "${{ matrix.flags }}" -o dist/arm64 .
-            CGO_ENABLED=1 GOARCH=amd64 go build -ldflags "${{ matrix.flags }}" -o dist/amd64 .
+            CGO_ENABLED=1 GOARCH=arm64 go build -ldflags "${{ matrix.flags }}" -o dist/arm64 ./cmd/claude-account-switcher
+            CGO_ENABLED=1 GOARCH=amd64 go build -ldflags "${{ matrix.flags }}" -o dist/amd64 ./cmd/claude-account-switcher
             # A menu bar app bundle around the universal binary, signed ad hoc
             # so Gatekeeper sees one consistent signature.
             app="dist/Claude Account Switcher.app"
@@ -51,14 +52,14 @@ jobs:
             lipo -create -output "$app/Contents/MacOS/claude-account-switcher" dist/arm64 dist/amd64
             rm dist/arm64 dist/amd64
             cp packaging/macos/Info.plist "$app/Contents/Info.plist"
-            v=$(sed -n 's/^const version = "\(.*\)"/\1/p' main.go)
+            v=$(sed -n 's/^const version = "\(.*\)"/\1/p' cmd/claude-account-switcher/main.go)
             v=${v%%-*}
             plutil -replace CFBundleShortVersionString -string "$v" "$app/Contents/Info.plist"
             plutil -replace CFBundleVersion -string "$v" "$app/Contents/Info.plist"
             codesign --force --deep -s - "$app"
             (cd dist && ditto -c -k --keepParent "Claude Account Switcher.app" "${{ matrix.out }}" && rm -rf "Claude Account Switcher.app")
           else
-            go build -ldflags "${{ matrix.flags }}" -o "dist/${{ matrix.out }}" .
+            go build -ldflags "${{ matrix.flags }}" -o "dist/${{ matrix.out }}" ./cmd/claude-account-switcher
           fi
           cd dist && { sha256sum "${{ matrix.out }}" 2>/dev/null || shasum -a 256 "${{ matrix.out }}"; } > "${{ matrix.out }}.sha256"
       - uses: actions/upload-artifact@v4
@@ -70,4 +71,8 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes 2>/dev/null || true; gh release upload "$GITHUB_REF_NAME" "dist/${{ matrix.out }}" "dist/${{ matrix.out }}.sha256" --clobber
+        # The notes are this version's section of CHANGES.md.
+        run: |
+          tr -d '\r' < CHANGES.md | awk -v h="## ${GITHUB_REF_NAME#v}" '$0 == h {f = 1; next} /^## / {f = 0} f' > notes.md
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md 2>/dev/null || true
+          gh release upload "$GITHUB_REF_NAME" "dist/${{ matrix.out }}" "dist/${{ matrix.out }}.sha256" --clobber

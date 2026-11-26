@@ -154,8 +154,8 @@ func TestSyncSessions(t *testing.T) {
 			t.Fatalf("deleted chat %s came back", name)
 		}
 	}
-	if at, _ := lastActivity(filepath.Join(target, "local_two.json")); at != 300 {
-		t.Fatalf("two not refreshed, activity %d", at)
+	if e, _ := readSessionIndex(filepath.Join(target, "local_two.json")); e.activity != 300 {
+		t.Fatalf("two not refreshed, activity %d", e.activity)
 	}
 	if n, _ := syncSessions(root, "b", "ob", ""); n != 0 {
 		t.Fatalf("second sync wrote %d, want 0", n)

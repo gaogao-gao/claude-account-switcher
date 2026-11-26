@@ -109,9 +109,8 @@ Changes against upstream v0.3.6. / 相对上游 v0.3.6 的改动。
 - 只有在继续对话的对话框中真正取消（-128）才会停止对话；路径比较改为精确匹配。
 - The build makes an ad-hoc signed, menu-bar-only `Claude Account Switcher.app` in a zip. Start at
   login uses the LaunchAgent label `io.github.gaogao-gao.claude-account-switcher`, matching the
-  bundle id; a login item an earlier build of this fork wrote under upstream's label for the same
-  program is replaced.
-- 构建产物为 zip 中经临时签名、仅显示在菜单栏的 `Claude Account Switcher.app`。开机启动使用与 bundle id 一致的 LaunchAgent 标签 `io.github.gaogao-gao.claude-account-switcher`；本分支早期版本以上游标签为同一程序写入的登录项会被替换。
+  bundle id.
+- 构建产物为 zip 中经临时签名、仅显示在菜单栏的 `Claude Account Switcher.app`。开机启动使用与 bundle id 一致的 LaunchAgent 标签 `io.github.gaogao-gao.claude-account-switcher`。
 
 ### Release / 发布
 
@@ -121,4 +120,5 @@ Changes against upstream v0.3.6. / 相对上游 v0.3.6 的改动。
 - 版本 `0.3.6-ext.1`；模块路径 `github.com/gaogao-gao/claude-account-switcher`。本分支的新版本会替换旧版本；上游版本启动时会被拒绝，菜单会提示用户退出其中一个。本分支发现已有切换器在运行时会弹窗说明。
 - Self-update is off and points to this repository only (from ext.2 on demand, see above).
   Upstream's website (`docs/`) and winget manifests are removed; Windows resources describe the fork.
-- 自动更新关闭，且只指向本仓库（ext.2 起改为手动检查，见上）。移除了上游的网站（`docs/`）和 winget 清单；Windows 资源信息标明为分支版本。
+  The Go sources live in `cmd/claude-account-switcher/`, and release notes come from this file.
+- 自动更新关闭，且只指向本仓库（ext.2 起改为手动检查，见上）。移除了上游的网站（`docs/`）和 winget 清单；Windows 资源信息标明为分支版本。Go 源码放在 `cmd/claude-account-switcher/`，发布说明取自本文件。

@@ -452,11 +452,6 @@ func (s sessionIndex) localID() string {
 	return strings.TrimSuffix(strings.TrimPrefix(s.name, "local_"), ".json")
 }
 
-func lastActivity(path string) (int64, error) {
-	entry, err := readSessionIndex(path)
-	return entry.activity, err
-}
-
 // samePath compares paths the way the file system does by default:
 // ignoring case on Windows only. A Mac volume can be case-sensitive.
 func samePath(a, b string) bool {

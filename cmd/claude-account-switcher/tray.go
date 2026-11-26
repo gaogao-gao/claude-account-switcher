@@ -249,7 +249,7 @@ var menuTab = map[bool]string{true: "\t", false: "    "}[runtime.GOOS == "window
 func usageText(a Account, threshold float64, now time.Time) string {
 	switch a.Problem {
 	case "":
-	case problemSignedOut, "signed out, add it again": // the latter from before 0.3.6-ext.1
+	case problemSignedOut:
 		return tr.SignedOut
 	default:
 		return a.Problem
